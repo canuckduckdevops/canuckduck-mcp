@@ -1,0 +1,48 @@
+{
+  "$schema": "https://registry.modelcontextprotocol.io/schemas/server.json",
+  "name": "ca.canuckduck/ripple",
+  "display_name": "CanuckDUCK RIPPLE",
+  "description": "Canadian policy causal knowledge graph. 1,328 variables, 4,637 causal edges, 46 constitutional doctrines, 165 landmark court cases, live StatCan/BoC data feeds. Built for policy analysts, government procurement, and legal professionals.",
+  "repository": {
+    "url": "https://github.com/canuckduckdevops/canuckduck-mcp",
+    "source": "github"
+  },
+  "version_detail": {
+    "version": "1.0.0",
+    "release_date": "2026-03-26"
+  },
+  "packages": [
+    {
+      "registry_name": "remote",
+      "name": "canuckduck-ripple-mcp",
+      "version": "1.0.0",
+      "runtime": "python",
+      "environment_variables": [
+        {
+          "name": "RIPPLE_API_KEY",
+          "description": "API key for authenticated access (optional for public tools)",
+          "required": false
+        }
+      ],
+      "remotes": [
+        {
+          "transport_type": "streamable-http",
+          "url": "https://mcp.canuckduck.ca/mcp"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {"name": "canuckduck_search", "description": "Search 1,328 Canadian policy variables"},
+    {"name": "canuckduck_stats", "description": "Graph summary statistics"},
+    {"name": "canuckduck_forward", "description": "Trace downstream causal effects"},
+    {"name": "canuckduck_backward", "description": "Trace upstream causes"},
+    {"name": "canuckduck_paths", "description": "Find causal paths between variables"},
+    {"name": "canuckduck_impact", "description": "Full impact radius analysis"},
+    {"name": "canuckduck_evidence", "description": "Government source evidence and citations"},
+    {"name": "canuckduck_news", "description": "Canadian policy news articles"},
+    {"name": "canuckduck_constitutional", "description": "Constitutional doctrine exploration"},
+    {"name": "canuckduck_root_trace", "description": "Trace to constitutional roots with CanLII cases"},
+    {"name": "canuckduck_cda_profile", "description": "Constitutional Divergence Analysis"}
+  ]
+}

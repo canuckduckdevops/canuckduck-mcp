@@ -1,0 +1,6 @@
+name: canuckduck-ripple
+description: Canadian policy causal knowledge graph — 1,328 variables, 4,637 causal edges, constitutional doctrines, CanLII case citations, live government data.
+startCommand:
+  type: remote
+  url: https://mcp.canuckduck.ca/mcp
+  transportType: streamable-http
