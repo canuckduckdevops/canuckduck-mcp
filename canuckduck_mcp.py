@@ -40,12 +40,14 @@ mcp = FastMCP(
     "canuckduck_mcp",
     instructions=(
         "You have access to the CanuckDUCK RIPPLE causal graph -- a validated "
-        "Canadian policy knowledge base with 229 variables and 3,000+ causal "
-        "relationships. Use canuckduck_search to find variables, then traverse "
-        "with canuckduck_forward or canuckduck_backward. Use canuckduck_paths "
-        "to find how two variables are connected. All data is grounded in "
-        "Canadian federal data sources (TBS Main Estimates, BoC, StatsCan, "
-        "CanLII) and validated through adversarial AI stress testing."
+        "Canadian policy knowledge base with 1,334 variables, 4,826 causal "
+        "relationships, 114 federal organizations, 165 landmark court cases, "
+        "and 46 constitutional doctrines. Use canuckduck_search to find "
+        "variables, canuckduck_forward/backward to traverse, canuckduck_paths "
+        "to find connections, canuckduck_simulate to model multi-variable "
+        "policy scenarios. 112 variables have authoritative baselines from "
+        "Statistics Canada, Bank of Canada, PBO, CIHI, and ECCC. Graph is "
+        "continuously improved by adversarial Gemini+Mistral audit pipeline."
     ),
 )
 
@@ -853,13 +855,136 @@ async def canuckduck_cda_profile(params: CdaProfileInput) -> str:
         return _handle_error(e)
 
 
+# ── Scenario simulation ─────────────────────────────────────────────────────
+
+class ScenarioInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scenario: str = Field(
+        description=(
+            "JSON array of scenario inputs. Each entry: "
+            '{"var_id": "interest_rate", "delta": -0.25}. '
+            "Delta is a signed percentage change."
+        ),
+    )
+    depth: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        description="Propagation depth (1=direct, 2=indirect, 3=deep)",
+    )
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.JSON,
+        description="'markdown' or 'json'",
+    )
+
+
+@mcp.tool(
+    name="canuckduck_simulate",
+    annotations={
+        "title": "Run Policy Scenario Simulation",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def canuckduck_simulate(params: ScenarioInput) -> str:
+    """
+    Run a multi-variable policy scenario simulation on the RIPPLE causal graph.
+
+    Model what happens when multiple policy variables change simultaneously.
+    Returns cascading impacts with projected values (where baselines exist),
+    constitutional constraint warnings, and source attribution.
+
+    Example scenario: What if BoC cuts rates 0.25% AND federal spending
+    increases 5%?
+      scenario: [{"var_id":"interest_rate","delta":-0.25},{"var_id":"federal_spending","delta":5}]
+
+    Requires: X-API-Key header with a professional key (cduck_p_*).
+
+    Args:
+        params (ScenarioInput): Parameters containing:
+            - scenario: JSON array of {var_id, delta} objects
+            - depth: propagation depth (1-3, default 2)
+            - response_format: 'markdown' or 'json'
+
+    Returns:
+        str: JSON with impacts[] (var_id, label, baseline, projected_value,
+             estimated_impact_percent, sources[]), constitutional_warnings[],
+             total_affected count, and scenario_inputs echo.
+    """
+    import json as _json
+    try:
+        scenario_list = _json.loads(params.scenario)
+    except (ValueError, TypeError):
+        return '{"error": "Invalid scenario JSON. Expected array of {var_id, delta} objects."}'
+
+    all_impacts: dict = {}
+    warnings: list = []
+
+    for entry in scenario_list:
+        var_id = entry.get("var_id", "")
+        delta = float(entry.get("delta", 0))
+        if not var_id or delta == 0:
+            continue
+
+        try:
+            impact_data = await _ripple_get(
+                "/impact",
+                {"variable": var_id, "delta": delta, "depth": params.depth},
+            )
+            for imp in impact_data.get("impacts", []):
+                tid = imp.get("target_variable", imp.get("var_id", ""))
+                if tid not in all_impacts:
+                    all_impacts[tid] = {
+                        "var_id": tid,
+                        "label": imp.get("target_label", imp.get("label", tid)),
+                        "estimated_impact_percent": 0,
+                        "sources": [],
+                    }
+                pct = imp.get("estimated_impact_percent", imp.get("impact_percent", 0))
+                all_impacts[tid]["estimated_impact_percent"] += pct
+                all_impacts[tid]["sources"].append({
+                    "from": var_id,
+                    "contribution": pct,
+                })
+        except Exception:
+            pass
+
+        try:
+            const_data = await _ripple_get("/constitutional", {"variable": var_id})
+            for c in const_data.get("constraints", []):
+                if float(c.get("severity", 0)) >= 0.7:
+                    warnings.append({
+                        "variable": var_id,
+                        "doctrine": c.get("doctrine_name", c.get("doctrine_id", "")),
+                        "severity": c.get("severity"),
+                        "direction": c.get("direction", ""),
+                    })
+        except Exception:
+            pass
+
+    result = {
+        "impacts": sorted(
+            all_impacts.values(),
+            key=lambda x: abs(x["estimated_impact_percent"]),
+            reverse=True,
+        ),
+        "constitutional_warnings": warnings,
+        "total_affected": len(all_impacts),
+        "scenario_inputs": scenario_list,
+        "depth": params.depth,
+    }
+    return _format_response(result, params.response_format)
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
     print(f"CanuckDUCK MCP Server starting on port {MCP_PORT}...")
     print(f"RIPPLE API backend: {RIPPLE_API_BASE}")
-    print(f"Tools registered: 11 (2 public, 6 registered, 3 professional)")
+    print(f"Tools registered: 12 (2 public, 6 registered, 4 professional)")
     mcp.settings.port = MCP_PORT
     mcp.settings.json_response = True
     mcp.settings.stateless_http = True

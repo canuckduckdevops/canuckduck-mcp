@@ -2,7 +2,7 @@
 
 **Canadian policy intelligence for AI assistants.**
 
-Connect your AI tool to `mcp.canuckduck.ca` and query a validated Canadian policy causal knowledge graph with 1,328 variables, 4,637 causal relationships, 46 constitutional doctrines, 165 landmark court cases, and live Canadian government data feeds.
+Connect your AI tool to `mcp.canuckduck.ca` and query a validated Canadian policy causal knowledge graph with 1,334 variables, 4,826 causal relationships, 46 constitutional doctrines, 165 landmark court cases, 114 federal organizations, and live Canadian government data feeds. 112 variables grounded with authoritative baselines from Statistics Canada, Bank of Canada, PBO, CIHI, and ECCC.
 
 ## Quick Start
 
@@ -38,12 +38,12 @@ Settings → Integrations → Add MCP Server
 3. Your key is auto-provisioned on checkout
 4. View your key at [nest.canuckduck.ca/nest/api-keys](https://nest.canuckduck.ca/nest/api-keys)
 
-## Available Tools (11)
+## Available Tools (12)
 
 ### Public (no key required)
 | Tool | Description |
 |---|---|
-| `canuckduck_search` | Search 1,328 policy variables by keyword |
+| `canuckduck_search` | Search 1,334 policy variables by keyword |
 | `canuckduck_stats` | Graph summary — variables, edges, organizations, cases |
 
 ### Registered (free API key)
@@ -62,11 +62,12 @@ Settings → Integrations → Add MCP Server
 | `canuckduck_constitutional` | Explore 46 Canadian constitutional doctrines |
 | `canuckduck_root_trace` | Trace a variable to constitutional roots with CanLII case citations |
 | `canuckduck_cda_profile` | Constitutional Divergence Analysis for policy topics |
+| `canuckduck_simulate` | Multi-variable policy scenario simulation with projected values and constitutional warnings |
 
 ## Data Sources
 
-- **RIPPLE Causal Graph** — 1,328 variables, 4,637 causal edges extracted from 27,000+ community observations and 18,000+ news articles
-- **Constitutional Layer** — 46 doctrines, 1,100+ CONSTRAINS edges, mapped via the A.B.E. Constitutional Authority Framework
+- **RIPPLE Causal Graph** — 1,334 variables, 4,826 causal edges extracted from 27,000+ community observations and 18,000+ news articles, continuously improved by adversarial Gemini+Mistral audit pipeline
+- **Constitutional Layer** — 46 doctrines, 4,006 CONSTRAINS edges (80% variable coverage), mapped via the A.B.E. Constitutional Authority Framework
 - **CanLII** — 165 landmark Canadian court cases with SCC/JCPC citations and CanLII URLs
 - **Canadian Data Vault** — Live feeds from Statistics Canada, Bank of Canada, IRCC, ECCC, PBO, CIHI
 - **Federal Organizations** — 114 departments/agencies with TBS 2025-26 Main Estimates budget data
