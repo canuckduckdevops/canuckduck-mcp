@@ -47,7 +47,10 @@ mcp = FastMCP(
         "to find connections, canuckduck_simulate to model multi-variable "
         "policy scenarios. 112 variables have authoritative baselines from "
         "Statistics Canada, Bank of Canada, PBO, CIHI, and ECCC. Graph is "
-        "continuously improved by adversarial Gemini+Mistral audit pipeline."
+        "continuously improved by adversarial Gemini+Mistral audit pipeline. "
+        "Geographic intelligence: canuckduck_geo_lookup resolves any Canadian "
+        "postal code to its community with coordinates. canuckduck_local_impact "
+        "localizes scenario simulations to a specific community."
     ),
 )
 
@@ -993,13 +996,302 @@ async def canuckduck_simulate(params: ScenarioInput) -> str:
     return _format_response(result, params.response_format)
 
 
+# ── Geospatial intelligence ──────────────────────────────────────────────────
+
+GEO_API_BASE = os.getenv("GEO_API_BASE", "http://127.0.0.1:8430/geo/v1")
+
+
+async def _geo_get(path: str, params: dict | None = None) -> dict:
+    """Make a GET request to the Geo API."""
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        response = await client.get(
+            f"{GEO_API_BASE}{path}",
+            params=params,
+            headers=_ripple_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+class GeoLookupInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    postal_code: str = Field(
+        description=(
+            "Canadian postal code (e.g., 'T2P 3H5') or 3-character FSA code "
+            "(e.g., 'T2P'). Returns community, city, province, and coordinates."
+        ),
+        min_length=3,
+        max_length=7,
+    )
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.MARKDOWN,
+        description="'markdown' or 'json'",
+    )
+
+
+@mcp.tool(
+    name="canuckduck_geo_lookup",
+    annotations={
+        "title": "Look Up Canadian Postal Code / Community",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def canuckduck_geo_lookup(params: GeoLookupInput) -> str:
+    """
+    Look up geographic context for a Canadian postal code or FSA code.
+
+    Returns the community name, city, province, and coordinates for any
+    Canadian postal code. Use the full 6-character postal code (e.g.,
+    'T2P3H5') for community-level precision, or the 3-character FSA
+    prefix (e.g., 'T2P') for area-level lookup.
+
+    Example: 'T2P 3H5' returns 'Downtown Commercial Core, Calgary, AB'
+    with lat/lon coordinates.
+
+    No API key required — this is a public lookup tool.
+    """
+    code = params.postal_code.upper().replace(" ", "").strip()
+    try:
+        if len(code) >= 6:
+            data = await _geo_get(f"/postal/{code}")
+        else:
+            data = await _geo_get(f"/fsa/{code[:3]}")
+        return _format_response(data, params.response_format)
+    except Exception as e:
+        return _handle_error(e)
+
+
+class GeoVariablesInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    province: Optional[str] = Field(
+        default=None,
+        description="2-character province code (ON, AB, BC, QC, SK, MB, NS, NB, NL, PE, YT, NT, NU)",
+        min_length=2,
+        max_length=2,
+    )
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.JSON,
+        description="'markdown' or 'json'",
+    )
+
+
+@mcp.tool(
+    name="canuckduck_geo_variables",
+    annotations={
+        "title": "Get Policy Variables for a Canadian Province",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def canuckduck_geo_variables(params: GeoVariablesInput) -> str:
+    """
+    Find RIPPLE causal graph variables scoped to a specific Canadian
+    province. Returns both province-specific variables (e.g.,
+    'alberta_gdp', 'ontario_population') and national variables that
+    apply everywhere.
+
+    Use this to understand which policy variables are relevant to a
+    particular province before running a localized scenario.
+
+    Requires: X-API-Key header with a registered key (cduck_r_*).
+    """
+    try:
+        if params.province:
+            data = await _geo_get(f"/province/{params.province.upper()}/variables")
+        else:
+            data = await _geo_get("/stats")
+        return _format_response(data, params.response_format)
+    except Exception as e:
+        return _handle_error(e)
+
+
+class LocalImpactInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    postal_code: str = Field(
+        description="Canadian postal code or FSA to localize impact for (e.g., 'T2P' for Calgary downtown)",
+        min_length=3,
+        max_length=7,
+    )
+    scenario: str = Field(
+        description='JSON array of scenario inputs: [{"var_id": "interest_rate", "delta": -5}]',
+    )
+    depth: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        description="Propagation depth (1=direct, 2=indirect, 3=deep)",
+    )
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.JSON,
+        description="'markdown' or 'json'",
+    )
+
+
+@mcp.tool(
+    name="canuckduck_local_impact",
+    annotations={
+        "title": "Localized Policy Impact Simulation",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def canuckduck_local_impact(params: LocalImpactInput) -> str:
+    """
+    Run a policy scenario simulation and localize the impacts to a
+    specific Canadian community.
+
+    Combines RIPPLE causal graph propagation with geographic scoping
+    to answer: 'What does this policy change mean for YOUR community?'
+
+    First resolves the postal code to a province, then runs the scenario
+    and filters results to show geographic relevance — provincial
+    variables for that region are marked as 'direct', national variables
+    as 'indirect'.
+
+    Example: postal_code='T2P', scenario=[{"var_id":"interest_rate","delta":-5}]
+    Returns Calgary-relevant impacts with local context.
+
+    Requires: X-API-Key header with a registered key (cduck_r_*).
+    """
+    import json as _json
+    try:
+        scenario_list = _json.loads(params.scenario)
+    except (ValueError, TypeError):
+        return '{"error": "Invalid scenario JSON."}'
+
+    # Resolve postal code to geography
+    code = params.postal_code.upper().replace(" ", "").strip()
+    try:
+        if len(code) >= 6:
+            geo = await _geo_get(f"/postal/{code}")
+        else:
+            geo = await _geo_get(f"/fsa/{code[:3]}")
+    except Exception:
+        return '{"error": "Could not resolve postal code."}'
+
+    province = geo.get("province", geo.get("province_code", ""))
+
+    # Get province variables for relevance scoring
+    try:
+        prov_data = await _geo_get(f"/province/{province}/variables")
+        prov_vars = {v["variable_key"] for v in prov_data.get("variables", [])
+                     if v.get("geo_level") == "provincial"}
+    except Exception:
+        prov_vars = set()
+
+    # Run scenario via RIPPLE forward traces
+    all_impacts: dict = {}
+    for entry in scenario_list:
+        var_id = entry.get("var_id", "")
+        delta = float(entry.get("delta", 0))
+        if not var_id or delta == 0:
+            continue
+        try:
+            fwd_data = await _ripple_get(
+                "/forward",
+                {"variable": var_id, "max_depth": params.depth},
+            )
+            best_edge: dict = {}
+            for edge in fwd_data.get("paths", []):
+                tid = edge.get("target_variable", "")
+                if not tid:
+                    continue
+                strength = float(edge.get("strength", 30) or 30)
+                if tid not in best_edge or strength > best_edge[tid][0]:
+                    best_edge[tid] = (strength, edge)
+
+            for tid, (strength, edge) in best_edge.items():
+                direction_mult = -1 if edge.get("direction") == "negative" else 1
+                impact_pct = round(delta * (strength / 100) * direction_mult, 2)
+                relevance = "provincial" if tid in prov_vars else "national"
+
+                if tid not in all_impacts:
+                    all_impacts[tid] = {
+                        "var_id": tid,
+                        "label": edge.get("target_display_name", tid),
+                        "category": edge.get("target_category", ""),
+                        "estimated_impact_percent": 0,
+                        "relevance": relevance,
+                        "sources": [],
+                    }
+                all_impacts[tid]["estimated_impact_percent"] += impact_pct
+                all_impacts[tid]["sources"].append({"from": var_id, "contribution": impact_pct})
+        except Exception:
+            pass
+
+    # Sort: provincial relevance first, then by absolute impact
+    sorted_impacts = sorted(
+        all_impacts.values(),
+        key=lambda x: (0 if x["relevance"] == "provincial" else 1, -abs(x["estimated_impact_percent"])),
+    )
+
+    result = {
+        "location": {
+            "postal_code": code,
+            "community": geo.get("community"),
+            "city": geo.get("city"),
+            "province": province,
+            "lat": geo.get("lat"),
+            "lon": geo.get("lon"),
+        },
+        "impacts": sorted_impacts,
+        "total_affected": len(sorted_impacts),
+        "provincial_impacts": sum(1 for i in sorted_impacts if i["relevance"] == "provincial"),
+        "scenario_inputs": scenario_list,
+        "depth": params.depth,
+    }
+    return _format_response(result, params.response_format)
+
+
+class GeoStatsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.JSON,
+        description="'markdown' or 'json'",
+    )
+
+
+@mcp.tool(
+    name="canuckduck_geo_stats",
+    annotations={
+        "title": "Geographic Data Coverage Statistics",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def canuckduck_geo_stats(params: GeoStatsInput) -> str:
+    """
+    Get geographic data coverage statistics for the CanuckDUCK platform.
+
+    Returns counts of FSA codes, census subdivisions (municipalities),
+    census metropolitan areas, federal ridings, communities, and postal
+    codes mapped. Also shows variable-to-geography mapping breakdown.
+
+    No API key required.
+    """
+    try:
+        data = await _geo_get("/stats")
+        return _format_response(data, params.response_format)
+    except Exception as e:
+        return _handle_error(e)
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
     print(f"CanuckDUCK MCP Server starting on port {MCP_PORT}...")
     print(f"RIPPLE API backend: {RIPPLE_API_BASE}")
-    print(f"Tools registered: 12 (2 public, 6 registered, 4 professional)")
+    print(f"Tools registered: 16 (4 public, 8 registered, 4 professional)")
     mcp.settings.port = MCP_PORT
     mcp.settings.json_response = True
     mcp.settings.stateless_http = True
