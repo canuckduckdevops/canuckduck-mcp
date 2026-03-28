@@ -928,38 +928,53 @@ async def canuckduck_simulate(params: ScenarioInput) -> str:
         if not var_id or delta == 0:
             continue
 
+        # Get forward edges (downstream effects)
         try:
-            impact_data = await _ripple_get(
-                "/impact",
-                {"variable": var_id, "delta": delta, "depth": params.depth},
+            fwd_data = await _ripple_get(
+                "/forward",
+                {"variable": var_id, "max_depth": params.depth},
             )
-            for imp in impact_data.get("impacts", []):
-                tid = imp.get("target_variable", imp.get("var_id", ""))
+            # Deduplicate: keep strongest edge per target
+            best_edge: dict = {}
+            for edge in fwd_data.get("paths", []):
+                tid = edge.get("target_variable", "")
+                if not tid:
+                    continue
+                strength = float(edge.get("strength", 30) or 30)
+                if tid not in best_edge or strength > best_edge[tid][0]:
+                    best_edge[tid] = (strength, edge)
+
+            for tid, (strength, edge) in best_edge.items():
+                direction_mult = -1 if edge.get("direction") == "negative" else 1
+                impact_pct = round(delta * (strength / 100) * direction_mult, 2)
+
                 if tid not in all_impacts:
                     all_impacts[tid] = {
                         "var_id": tid,
-                        "label": imp.get("target_label", imp.get("label", tid)),
+                        "label": edge.get("target_display_name", tid),
+                        "category": edge.get("target_category", ""),
                         "estimated_impact_percent": 0,
                         "sources": [],
                     }
-                pct = imp.get("estimated_impact_percent", imp.get("impact_percent", 0))
-                all_impacts[tid]["estimated_impact_percent"] += pct
+                all_impacts[tid]["estimated_impact_percent"] += impact_pct
                 all_impacts[tid]["sources"].append({
                     "from": var_id,
-                    "contribution": pct,
+                    "contribution": impact_pct,
                 })
         except Exception:
             pass
 
+        # Get constitutional constraints
         try:
             const_data = await _ripple_get("/constitutional", {"variable": var_id})
-            for c in const_data.get("constraints", []):
-                if float(c.get("severity", 0)) >= 0.7:
+            for doc in const_data.get("doctrines", []):
+                severity = float(doc.get("severity", 0) or 0)
+                if severity >= 0.7:
                     warnings.append({
                         "variable": var_id,
-                        "doctrine": c.get("doctrine_name", c.get("doctrine_id", "")),
-                        "severity": c.get("severity"),
-                        "direction": c.get("direction", ""),
+                        "doctrine": doc.get("doctrine_name", doc.get("name", "")),
+                        "severity": severity,
+                        "direction": doc.get("direction", ""),
                     })
         except Exception:
             pass
