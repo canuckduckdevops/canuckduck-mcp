@@ -38,7 +38,7 @@ Settings → Integrations → Add MCP Server
 3. Your key is auto-provisioned on checkout
 4. View your key at [nest.canuckduck.ca/nest/api-keys](https://nest.canuckduck.ca/nest/api-keys)
 
-## Available Tools (16)
+## Available Tools (18)
 
 ### Public (no key required)
 | Tool | Description |
@@ -59,6 +59,8 @@ Settings → Integrations → Add MCP Server
 | `canuckduck_news` | Canadian news articles from government and media RSS feeds, filtered by policy topic. |
 | `canuckduck_geo_variables` | Find RIPPLE variables scoped to a specific Canadian province. Returns provincial + national variables. |
 | `canuckduck_local_impact` | Run a policy scenario and localize impacts to a specific community. Answers: 'What does this mean for MY community?' |
+| `canuckduck_propose` | Propose a new variable, causal edge, or evidence to the RIPPLE graph. Enters a review queue — nothing modifies the active graph until approved. |
+| `canuckduck_review_queue` | List pending graph proposals, check status, or approve/reject proposals. |
 
 ### Professional (paid key)
 | Tool | Description |
@@ -70,8 +72,8 @@ Settings → Integrations → Add MCP Server
 
 ## Data Sources
 
-- **RIPPLE Causal Graph** — 1,334 variables, 5,130+ causal edges, continuously improved by adversarial Mistral+Gemini audit pipeline
-- **Constitutional Layer** — 46 doctrines, 4,006 CONSTRAINS edges (80% variable coverage), mapped via the A.B.E. Constitutional Authority Framework
+- **RIPPLE Causal Graph** — 1,351 variables, 5,253 causal edges, continuously improved by adversarial Mistral+Gemini audit pipeline
+- **Constitutional Layer** — 46 doctrines, 4,018 CONSTRAINS edges (80% variable coverage), mapped via the A.B.E. Constitutional Authority Framework
 - **CanLII** — 165 landmark Canadian court cases with SCC/JCPC citations and CanLII URLs
 - **Canadian Data Vault** — Live feeds from Statistics Canada, Bank of Canada, IRCC, ECCC, PBO, CIHI
 - **Federal Organizations** — 114 departments/agencies with TBS 2025-26 Main Estimates budget data

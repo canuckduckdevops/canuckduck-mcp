@@ -9,14 +9,14 @@
     "source": "github"
   },
   "version_detail": {
-    "version": "1.1.0",
-    "release_date": "2026-03-28"
+    "version": "1.2.0",
+    "release_date": "2026-03-29"
   },
   "packages": [
     {
       "registry_name": "remote",
       "name": "canuckduck-ripple-mcp",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "runtime": "python",
       "environment_variables": [
         {
@@ -49,6 +49,8 @@
     {"name": "canuckduck_constitutional", "description": "Explore 46 constitutional doctrines with connected policy variables."},
     {"name": "canuckduck_root_trace", "description": "Trace a variable to constitutional roots with CanLII case citations."},
     {"name": "canuckduck_cda_profile", "description": "Constitutional Divergence Analysis: pressure scores, Charter divergence, legal precedents."},
-    {"name": "canuckduck_simulate", "description": "Multi-variable policy scenario simulation with projected values and constitutional warnings."}
+    {"name": "canuckduck_simulate", "description": "Multi-variable policy scenario simulation with projected values and constitutional warnings."},
+    {"name": "canuckduck_propose", "description": "Propose a new variable, causal edge, or evidence to the RIPPLE graph review queue."},
+    {"name": "canuckduck_review_queue", "description": "List, check status, or approve/reject graph proposals."}
   ]
 }

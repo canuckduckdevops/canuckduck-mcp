@@ -14,10 +14,14 @@ Backend:   api.canuckduck.ca/ripple
 
 import json
 import os
+import time
+import uuid
 from enum import Enum
 from typing import Optional
 
 import httpx
+import psycopg2
+import psycopg2.extras
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,6 +34,24 @@ MCP_PORT        = int(os.getenv("MCP_PORT", "8765"))
 # API key tier prefixes for inbound requests from AI platforms
 KEY_PREFIX_REGISTERED    = "cduck_r_"
 KEY_PREFIX_PROFESSIONAL  = "cduck_p_"
+
+# Proposal queue database (Ducklings PG on .63)
+PROPOSAL_DB_DSN = os.getenv(
+    "PROPOSAL_DB_DSN",
+    "host=10.0.1.63 port=5432 dbname=ducklings_db user=ducklings_user "
+    "password=qaM6YDSRcKjk0nJp9BOnTCe3VuqAwHQI4q32wniCH34=",
+)
+
+VALID_CATEGORIES = [
+    "fiscal", "economic", "financial", "demographic", "environmental",
+    "governance", "infrastructure", "operational", "social", "security",
+    "health", "education", "cultural",
+]
+
+VALID_EVIDENCE_TYPES = [
+    "empirical", "accounting", "policy", "academic", "structural",
+    "theoretical", "statistical", "government_report", "legal", "model",
+]
 
 # HTTP timeout for RIPPLE API calls
 REQUEST_TIMEOUT = 30.0
@@ -1285,13 +1307,436 @@ async def canuckduck_geo_stats(params: GeoStatsInput) -> str:
         return _handle_error(e)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PROPOSE/REVIEW TOOLS (registered+ API key required)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _get_proposal_db():
+    """Get a connection to the proposal queue database."""
+    return psycopg2.connect(PROPOSAL_DB_DSN)
+
+
+async def _check_variable_exists(var_id: str) -> bool:
+    """Check if a variable exists in the RIPPLE graph."""
+    try:
+        data = await _ripple_get("/search", {"q": var_id, "limit": 50})
+        results = data.get("results", [])
+        return any(
+            r.get("variable_key") == var_id or r.get("var_id") == var_id
+            for r in results
+        )
+    except Exception:
+        return False
+
+
+async def _run_duplicate_check(var_id: str, label: str) -> dict:
+    """Check for duplicate or very similar variables."""
+    try:
+        keywords = label.split()[:3]
+        query = " ".join(keywords)
+        data = await _ripple_get("/search", {"q": query, "limit": 10})
+        results = data.get("results", [])
+        similar = []
+        for r in results:
+            r_id = r.get("variable_key", r.get("var_id", ""))
+            r_label = r.get("display_name", r.get("label", ""))
+            if r_id == var_id:
+                return {"is_duplicate": True, "exact_match": r_id, "similar_vars": []}
+            label_words = set(label.lower().split())
+            r_words = set(r_label.lower().split())
+            if label_words and r_words:
+                overlap = len(label_words & r_words) / len(label_words | r_words)
+                if overlap > 0.4:
+                    similar.append({"var_id": r_id, "label": r_label, "similarity": round(overlap, 2)})
+        return {"is_duplicate": False, "similar_vars": similar[:5]}
+    except Exception:
+        return {"is_duplicate": False, "similar_vars": [], "error": "check_failed"}
+
+
+async def _run_connectivity_test(source_var_id: str, target_var_id: str) -> dict:
+    """Test connectivity between two variables."""
+    try:
+        data = await _ripple_get("/paths", {
+            "from": source_var_id, "to": target_var_id, "max_depth": 3,
+        })
+        path_count = data.get("path_count", data.get("total_paths", 0))
+        return {
+            "existing_paths": path_count,
+            "is_shortcut": path_count > 0,
+            "is_bridge": path_count == 0,
+        }
+    except Exception:
+        return {"existing_paths": 0, "is_bridge": True, "error": "check_failed"}
+
+
+# ── Propose input models ─────────────────────────────────────────────────────
+
+class ProposeVariablePayload(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    var_id: str = Field(
+        ..., description="Variable ID (snake_case). Must not already exist.",
+        min_length=3, max_length=100, pattern=r"^[a-z][a-z0-9_]*$",
+    )
+    label: str = Field(
+        ..., description="Human-readable variable name",
+        min_length=5, max_length=200,
+    )
+    description: str = Field(
+        ..., description="Evidence-grounded description. Minimum 50 characters.",
+        min_length=50, max_length=2000,
+    )
+    category: str = Field(
+        ..., description="Variable category: fiscal, economic, financial, demographic, "
+                         "environmental, governance, infrastructure, operational, social, "
+                         "security, health, education, cultural",
+    )
+    unit: str = Field(..., description="Unit of measurement", min_length=1, max_length=50)
+    baseline_value: float = Field(..., description="Current or initial value")
+    jurisdiction: Optional[str] = Field(
+        default=None, description="2-letter province code, 'federal', or null", max_length=10,
+    )
+    evidence_sources: list[str] = Field(
+        ..., description="At least one evidence source (URL or citation)", min_length=1,
+    )
+
+
+class ProposeEdgePayload(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    source_var_id: str = Field(
+        ..., description="Source variable ID (must exist). Use canuckduck_search to find.",
+        min_length=3, max_length=100,
+    )
+    target_var_id: str = Field(
+        ..., description="Target variable ID (must exist). The variable CAUSED by the source.",
+        min_length=3, max_length=100,
+    )
+    direction: str = Field(
+        ..., description="'positive' or 'negative'", pattern=r"^(positive|negative)$",
+    )
+    strength: int = Field(
+        ..., description="Causal strength (1-100)", ge=1, le=100,
+    )
+    confidence: float = Field(
+        ..., description="Confidence (0.0-1.0). 1.0=accounting identity, 0.5=theoretical.",
+        ge=0.0, le=1.0,
+    )
+    evidence_type: str = Field(
+        ..., description="Evidence type: empirical, accounting, policy, academic, structural, "
+                         "theoretical, statistical, government_report, legal, model",
+    )
+    evidence_source: str = Field(
+        ..., description="Citation or URL", min_length=5, max_length=500,
+    )
+    mechanism: str = Field(
+        ..., description="HOW and WHY the relationship works. Min 30 chars.",
+        min_length=30, max_length=1000,
+    )
+    delay_real_months: Optional[int] = Field(
+        default=None, description="Months before effect manifests", ge=0, le=120,
+    )
+
+
+class ProposeEvidencePayload(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    source_var_id: str = Field(..., description="Source variable of the existing edge", min_length=3, max_length=100)
+    target_var_id: str = Field(..., description="Target variable of the existing edge", min_length=3, max_length=100)
+    evidence_type: str = Field(..., description="Type of new evidence")
+    evidence_source: str = Field(..., description="Citation or URL", min_length=5, max_length=500)
+    confidence_update: Optional[float] = Field(default=None, description="Suggested new confidence", ge=0.0, le=1.0)
+    accuracy_observation: Optional[str] = Field(default=None, description="Observed outcome vs predicted", max_length=1000)
+    source_url: Optional[str] = Field(default=None, description="URL to source document", max_length=500)
+
+
+class ProposeInput(BaseModel):
+    """Submit a proposed variable, edge, or evidence to the RIPPLE graph review queue."""
+    model_config = ConfigDict(extra="forbid")
+    proposal_type: str = Field(
+        ..., description="'variable', 'edge', or 'evidence'",
+        pattern=r"^(variable|edge|evidence)$",
+    )
+    variable: Optional[ProposeVariablePayload] = Field(default=None, description="Required when proposal_type='variable'")
+    edge: Optional[ProposeEdgePayload] = Field(default=None, description="Required when proposal_type='edge'")
+    evidence: Optional[ProposeEvidencePayload] = Field(default=None, description="Required when proposal_type='evidence'")
+    proposal_context: Optional[str] = Field(default=None, description="Why this proposal matters", max_length=1000)
+
+
+@mcp.tool(
+    name="canuckduck_propose",
+    annotations={
+        "title": "Propose Graph Contribution",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+)
+async def canuckduck_propose(params: ProposeInput) -> str:
+    """
+    Propose a new variable, causal edge, or evidence to the RIPPLE graph.
+
+    All proposals enter a review queue -- nothing modifies the active graph
+    until a human reviewer approves. Use this to contribute knowledge that
+    fills gaps in the Canadian policy causal model.
+
+    Three proposal types:
+    - 'variable': New policy variable with evidence sources
+    - 'edge': New CAUSES relationship between existing variables
+    - 'evidence': New evidence for an existing causal relationship
+
+    Requires: API key (registered cduck_r_* or professional cduck_p_*).
+    Rate limits: 5-20 proposals/hour depending on type and key tier.
+    """
+    try:
+        if params.proposal_type == "variable" and not params.variable:
+            return "Error: proposal_type='variable' but no variable payload provided."
+        if params.proposal_type == "edge" and not params.edge:
+            return "Error: proposal_type='edge' but no edge payload provided."
+        if params.proposal_type == "evidence" and not params.evidence:
+            return "Error: proposal_type='evidence' but no evidence payload provided."
+
+        proposal_uuid = str(uuid.uuid4())
+        enrichment = {}
+
+        if params.proposal_type == "variable":
+            v = params.variable
+            if v.category not in VALID_CATEGORIES:
+                return f"Error: Invalid category '{v.category}'. Must be one of: {', '.join(VALID_CATEGORIES)}"
+            exists = await _check_variable_exists(v.var_id)
+            if exists:
+                return f"Error: Variable '{v.var_id}' already exists. Use 'evidence' type to add evidence to existing variables."
+            enrichment["duplicate_check"] = await _run_duplicate_check(v.var_id, v.label)
+            payload = v.model_dump()
+
+        elif params.proposal_type == "edge":
+            e = params.edge
+            if e.evidence_type not in VALID_EVIDENCE_TYPES:
+                return f"Error: Invalid evidence_type '{e.evidence_type}'. Must be one of: {', '.join(VALID_EVIDENCE_TYPES)}"
+            source_exists = await _check_variable_exists(e.source_var_id)
+            target_exists = await _check_variable_exists(e.target_var_id)
+            if not source_exists:
+                return f"Error: Source variable '{e.source_var_id}' not found. Use canuckduck_search first."
+            if not target_exists:
+                return f"Error: Target variable '{e.target_var_id}' not found. Use canuckduck_search first."
+            enrichment["connectivity_test"] = await _run_connectivity_test(e.source_var_id, e.target_var_id)
+            payload = e.model_dump()
+
+        else:
+            ev = params.evidence
+            source_exists = await _check_variable_exists(ev.source_var_id)
+            target_exists = await _check_variable_exists(ev.target_var_id)
+            if not source_exists:
+                return f"Error: Source variable '{ev.source_var_id}' not found."
+            if not target_exists:
+                return f"Error: Target variable '{ev.target_var_id}' not found."
+            payload = ev.model_dump()
+
+        # Quality score
+        quality = 50.0
+        if params.proposal_context:
+            quality += 10
+        if params.proposal_type == "variable" and params.variable:
+            if len(params.variable.description) > 200:
+                quality += 10
+            if len(params.variable.evidence_sources) > 1:
+                quality += 10
+            if params.variable.jurisdiction:
+                quality += 5
+        elif params.proposal_type == "edge" and params.edge:
+            if len(params.edge.mechanism) > 100:
+                quality += 10
+            if params.edge.confidence >= 0.7:
+                quality += 5
+            if params.edge.delay_real_months is not None:
+                quality += 5
+            if enrichment.get("connectivity_test", {}).get("is_bridge"):
+                quality += 15
+        elif params.proposal_type == "evidence" and params.evidence:
+            if params.evidence.accuracy_observation:
+                quality += 15
+            if params.evidence.source_url:
+                quality += 5
+        enrichment["auto_quality_score"] = min(quality, 100)
+
+        conn = _get_proposal_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO ripple_proposal_queue
+                   (uuid, proposal_type, payload, proposed_by_api_key,
+                    proposed_by_model, proposal_context,
+                    duplicate_check_result, connectivity_test,
+                    auto_quality_score, status, created_at, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   RETURNING id""",
+                (
+                    proposal_uuid, params.proposal_type, json.dumps(payload),
+                    "mcp_session", "mcp_client", params.proposal_context,
+                    json.dumps(enrichment.get("duplicate_check")),
+                    json.dumps(enrichment.get("connectivity_test")),
+                    enrichment.get("auto_quality_score", 50),
+                    "ready_for_review", int(time.time()), int(time.time()),
+                ),
+            )
+            row_id = cur.fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        return json.dumps({
+            "proposal_id": proposal_uuid,
+            "internal_id": row_id,
+            "status": "ready_for_review",
+            "proposal_type": params.proposal_type,
+            "auto_enrichment": enrichment,
+            "message": "Proposal submitted. It will be reviewed by the CanuckDUCK team.",
+        }, indent=2, ensure_ascii=False)
+
+    except Exception as e:
+        return _handle_error(e)
+
+
+# ── Review queue tool ────────────────────────────────────────────────────────
+
+class ReviewQueueInput(BaseModel):
+    """List, check, or decide on graph proposals."""
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(
+        ..., description="'list', 'status', or 'decide' (decide requires professional key)",
+        pattern=r"^(list|status|decide)$",
+    )
+    proposal_id: Optional[str] = Field(default=None, description="Proposal UUID for status/decide", max_length=36)
+    decision: Optional[str] = Field(default=None, description="'approve' or 'reject'", pattern=r"^(approve|reject)$")
+    review_notes: Optional[str] = Field(default=None, description="Notes (required for reject)", max_length=1000)
+    filters: Optional[dict] = Field(
+        default=None,
+        description="For 'list': {proposal_type, status, limit}",
+    )
+    response_format: ResponseFormat = Field(default=ResponseFormat.JSON, description="'markdown' or 'json'")
+
+
+@mcp.tool(
+    name="canuckduck_review_queue",
+    annotations={
+        "title": "Review Graph Proposals",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def canuckduck_review_queue(params: ReviewQueueInput) -> str:
+    """
+    List pending graph proposals, check status, or approve/reject.
+
+    - 'list': Show proposals in the review queue (filterable by type, status)
+    - 'status': Check a specific proposal by UUID
+    - 'decide': Approve or reject (requires professional API key)
+
+    Approved proposals are applied to the active RIPPLE graph by admins.
+
+    Requires: Registered key for list/status, Professional for decide.
+    """
+    try:
+        conn = _get_proposal_db()
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            if params.action == "list":
+                filters = params.filters or {}
+                where_parts, vals = [], []
+                if "proposal_type" in filters:
+                    where_parts.append("proposal_type = %s")
+                    vals.append(filters["proposal_type"])
+                if "status" in filters:
+                    where_parts.append("status = %s")
+                    vals.append(filters["status"])
+                where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+                limit = min(int(filters.get("limit", 20)), 50)
+
+                cur.execute(
+                    f"SELECT uuid, proposal_type, payload, status, auto_quality_score, "
+                    f"duplicate_check_result, connectivity_test, proposal_context, "
+                    f"created_at, reviewed_at, review_notes "
+                    f"FROM ripple_proposal_queue {where_sql} "
+                    f"ORDER BY created_at DESC LIMIT %s",
+                    vals + [limit],
+                )
+                rows = cur.fetchall()
+                proposals = []
+                for row in rows:
+                    p = dict(row)
+                    for jf in ("payload", "duplicate_check_result", "connectivity_test"):
+                        if isinstance(p.get(jf), str):
+                            p[jf] = json.loads(p[jf])
+                    proposals.append(p)
+
+                cur.execute("SELECT status, count(*) AS cnt FROM ripple_proposal_queue GROUP BY status")
+                stats = {r["status"]: r["cnt"] for r in cur.fetchall()}
+
+                return json.dumps({"count": len(proposals), "queue_stats": stats, "proposals": proposals},
+                                  indent=2, ensure_ascii=False, default=str)
+
+            elif params.action == "status":
+                if not params.proposal_id:
+                    return "Error: proposal_id required for 'status'."
+                cur.execute("SELECT * FROM ripple_proposal_queue WHERE uuid = %s", (params.proposal_id,))
+                row = cur.fetchone()
+                if not row:
+                    return f"Error: Proposal '{params.proposal_id}' not found."
+                p = dict(row)
+                for jf in ("payload", "duplicate_check_result", "connectivity_test", "constitutional_scan"):
+                    if isinstance(p.get(jf), str):
+                        p[jf] = json.loads(p[jf])
+                return json.dumps(p, indent=2, ensure_ascii=False, default=str)
+
+            elif params.action == "decide":
+                if not params.proposal_id:
+                    return "Error: proposal_id required for 'decide'."
+                if not params.decision:
+                    return "Error: decision ('approve'/'reject') required."
+                if params.decision == "reject" and not params.review_notes:
+                    return "Error: review_notes required when rejecting."
+
+                cur.execute(
+                    "SELECT id, status FROM ripple_proposal_queue WHERE uuid = %s",
+                    (params.proposal_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return f"Error: Proposal '{params.proposal_id}' not found."
+                if row["status"] not in ("pending", "ready_for_review", "auto_enriching"):
+                    return f"Error: Proposal status is '{row['status']}' — cannot review."
+
+                now = int(time.time())
+                new_status = "approved" if params.decision == "approve" else "rejected"
+                cur.execute(
+                    """UPDATE ripple_proposal_queue
+                       SET status = %s, reviewed_at = %s, review_notes = %s,
+                           review_decision_reason = %s, updated_at = %s
+                       WHERE uuid = %s""",
+                    (new_status, now, params.review_notes, params.decision, now, params.proposal_id),
+                )
+                conn.commit()
+
+                result = {"proposal_id": params.proposal_id, "decision": params.decision, "new_status": new_status}
+                if params.decision == "approve":
+                    result["next_step"] = "Approved. Admin will apply to active graph."
+                return json.dumps(result, indent=2, ensure_ascii=False)
+
+        finally:
+            conn.close()
+
+    except Exception as e:
+        return _handle_error(e)
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
     print(f"CanuckDUCK MCP Server starting on port {MCP_PORT}...")
     print(f"RIPPLE API backend: {RIPPLE_API_BASE}")
-    print(f"Tools registered: 16 (4 public, 8 registered, 4 professional)")
+    print(f"Tools registered: 18 (4 public, 10 registered, 4 professional)")
     mcp.settings.port = MCP_PORT
     mcp.settings.json_response = True
     mcp.settings.stateless_http = True
