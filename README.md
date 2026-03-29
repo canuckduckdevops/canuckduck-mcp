@@ -38,39 +38,44 @@ Settings → Integrations → Add MCP Server
 3. Your key is auto-provisioned on checkout
 4. View your key at [nest.canuckduck.ca/nest/api-keys](https://nest.canuckduck.ca/nest/api-keys)
 
-## Available Tools (12)
+## Available Tools (16)
 
 ### Public (no key required)
 | Tool | Description |
 |---|---|
-| `canuckduck_search` | Search 1,334 policy variables by keyword |
-| `canuckduck_stats` | Graph summary — variables, edges, organizations, cases |
+| `canuckduck_search` | Search 1,334 Canadian policy variables by keyword. Use first to find variable IDs for graph traversal. |
+| `canuckduck_stats` | Graph summary statistics: variables, edges, organizations, cases, constitutional doctrines. Use to ground responses about graph scope. |
+| `canuckduck_geo_lookup` | Look up any Canadian postal code or FSA code. Returns community name, city, province, and coordinates. Example: 'T2P 3H5' returns 'Downtown Commercial Core, Calgary, AB'. |
+| `canuckduck_geo_stats` | Geographic data coverage: FSA codes, municipalities, federal ridings, postal codes, communities. |
 
 ### Registered (free API key)
 | Tool | Description |
 |---|---|
-| `canuckduck_forward` | Trace downstream causal effects of a variable |
-| `canuckduck_backward` | Trace upstream causes of a variable |
-| `canuckduck_paths` | Find all causal paths between two variables |
-| `canuckduck_impact` | Full impact radius analysis |
-| `canuckduck_evidence` | Source evidence and government citations |
-| `canuckduck_news` | Canadian news articles related to a variable |
+| `canuckduck_forward` | Trace what a policy variable CAUSES downstream. Use to answer: 'If we change X, what else changes?' |
+| `canuckduck_backward` | Trace what CAUSES a policy variable upstream. Use to answer: 'Why is X happening?' or 'What drives X?' |
+| `canuckduck_paths` | Find all causal paths connecting two policy variables. Use to answer: 'How is X connected to Y?' |
+| `canuckduck_impact` | Full causal impact radius — all downstream and upstream relationships scored by influence weight. |
+| `canuckduck_evidence` | Source evidence and CanLII case citations supporting a causal relationship. Use when sourcing is needed. |
+| `canuckduck_news` | Canadian news articles from government and media RSS feeds, filtered by policy topic. |
+| `canuckduck_geo_variables` | Find RIPPLE variables scoped to a specific Canadian province. Returns provincial + national variables. |
+| `canuckduck_local_impact` | Run a policy scenario and localize impacts to a specific community. Answers: 'What does this mean for MY community?' |
 
 ### Professional (paid key)
 | Tool | Description |
 |---|---|
-| `canuckduck_constitutional` | Explore 46 Canadian constitutional doctrines |
-| `canuckduck_root_trace` | Trace a variable to constitutional roots with CanLII case citations |
-| `canuckduck_cda_profile` | Constitutional Divergence Analysis for policy topics |
-| `canuckduck_simulate` | Multi-variable policy scenario simulation with projected values and constitutional warnings |
+| `canuckduck_constitutional` | Explore 46 Canadian constitutional doctrines with connected policy variables. Covers Charter rights, division of powers, Duty to Consult. |
+| `canuckduck_root_trace` | Trace a variable to constitutional roots with CanLII case citations and legal precedents. |
+| `canuckduck_cda_profile` | Constitutional Divergence Analysis profile: pressure scores, Charter divergence, linked legal precedents. |
+| `canuckduck_simulate` | Multi-variable policy scenario simulation with projected values, constitutional warnings, and geographic context. |
 
 ## Data Sources
 
-- **RIPPLE Causal Graph** — 1,334 variables, 4,826 causal edges extracted from 27,000+ community observations and 18,000+ news articles, continuously improved by adversarial Gemini+Mistral audit pipeline
+- **RIPPLE Causal Graph** — 1,334 variables, 5,130+ causal edges, continuously improved by adversarial Mistral+Gemini audit pipeline
 - **Constitutional Layer** — 46 doctrines, 4,006 CONSTRAINS edges (80% variable coverage), mapped via the A.B.E. Constitutional Authority Framework
 - **CanLII** — 165 landmark Canadian court cases with SCC/JCPC citations and CanLII URLs
 - **Canadian Data Vault** — Live feeds from Statistics Canada, Bank of Canada, IRCC, ECCC, PBO, CIHI
 - **Federal Organizations** — 114 departments/agencies with TBS 2025-26 Main Estimates budget data
+- **Geospatial** — 1,651 FSA centroids, 5,161 municipalities, 338 federal ridings, 29,638 postal codes, 244 Calgary communities with PostGIS boundaries
 
 ## Example Queries
 

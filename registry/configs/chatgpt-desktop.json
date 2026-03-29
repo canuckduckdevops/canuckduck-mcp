@@ -1,0 +1,10 @@
+{
+  "mcp_servers": [
+    {
+      "name": "canuckduck",
+      "url": "https://mcp.canuckduck.ca/mcp",
+      "transport": "sse",
+      "description": "Canadian civic intelligence: policy causal graphs, constitutional law, CanLII cases, geospatial data"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "canuckduck": {
+      "type": "sse",
+      "url": "https://mcp.canuckduck.ca/mcp"
+    }
+  }
+}

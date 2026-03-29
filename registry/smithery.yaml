@@ -1,0 +1,36 @@
+name: canuckduck
+displayName: CanuckDUCK - Canadian Civic Intelligence
+description: >
+  Access the RIPPLE Canadian policy causal knowledge graph — 1,334 policy
+  variables, 5,130+ causal relationships, 46 constitutional doctrines,
+  165 CanLII landmark cases, 114 federal organizations with TBS budget data,
+  and geospatial intelligence covering 5,161 municipalities, 338 federal
+  ridings, and 29,638 postal codes. Built on sovereign Canadian infrastructure
+  by CanuckDUCK Research Corporation, Calgary AB. Adversarially validated by
+  competing Mistral and Gemini AI models.
+homepage: https://canuckduck.ca
+license: Proprietary
+contact: hello@canuckduck.ca
+category: government
+tags:
+  - canada
+  - policy
+  - civic
+  - government
+  - constitutional-law
+  - parliament
+  - causal-graph
+  - geospatial
+server:
+  transport: streamable-http
+  url: https://mcp.canuckduck.ca/mcp
+auth:
+  type: apiKey
+  header: Authorization
+  prefix: "Bearer "
+  description: >
+    Public tools (search, stats, geo_lookup, geo_stats) require no auth.
+    Registered tier (free key from nest.canuckduck.ca) unlocks graph traversal.
+    Professional tier ($49/mo) unlocks constitutional analysis and simulation.
+tools: 16
+version: 1.0.0

@@ -1,0 +1,5 @@
+mcpServers:
+  - name: canuckduck
+    transport:
+      type: sse
+      url: https://mcp.canuckduck.ca/mcp
