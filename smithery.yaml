@@ -1,5 +1,10 @@
 name: canuckduck-ripple
-description: Canadian policy causal knowledge graph — 1,328 variables, 4,637 causal edges, constitutional doctrines, CanLII case citations, live government data.
+description: >
+  Canadian civic intelligence MCP server. RIPPLE causal policy graph
+  (1,334 variables, 5,130+ causal edges), constitutional doctrine
+  (46 doctrines, 165 CanLII cases), federal budget data (114 organizations),
+  geospatial intelligence (5,161 municipalities, 338 ridings, 29,638 postal codes).
+  Sovereign Canadian infrastructure by CanuckDUCK Research Corporation.
 startCommand:
   type: remote
   url: https://mcp.canuckduck.ca/mcp

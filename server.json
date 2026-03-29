@@ -2,25 +2,25 @@
   "$schema": "https://registry.modelcontextprotocol.io/schemas/server.json",
   "name": "ca.canuckduck/ripple",
   "display_name": "CanuckDUCK RIPPLE",
-  "description": "Canadian policy causal knowledge graph. 1,328 variables, 4,637 causal edges, 46 constitutional doctrines, 165 landmark court cases, live StatCan/BoC data feeds. Built for policy analysts, government procurement, and legal professionals.",
+  "description": "Canadian civic intelligence MCP server. RIPPLE causal policy graph (1,334 variables, 5,130+ causal edges), 46 constitutional doctrines, 165 CanLII landmark cases, 114 federal organizations with TBS budget data, geospatial intelligence (5,161 municipalities, 338 ridings, 29,638 postal codes). Live feeds from Statistics Canada, Bank of Canada, PBO, CIHI, ECCC. Adversarially validated by competing Mistral and Gemini AI models. Built by CanuckDUCK Research Corporation, Calgary AB.",
   "repository": {
     "url": "https://github.com/canuckduckdevops/canuckduck-mcp",
     "source": "github"
   },
   "version_detail": {
-    "version": "1.0.0",
-    "release_date": "2026-03-26"
+    "version": "1.1.0",
+    "release_date": "2026-03-28"
   },
   "packages": [
     {
       "registry_name": "remote",
       "name": "canuckduck-ripple-mcp",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "runtime": "python",
       "environment_variables": [
         {
           "name": "RIPPLE_API_KEY",
-          "description": "API key for authenticated access (optional for public tools)",
+          "description": "API key for authenticated access. Optional — public tools work without a key. Get a key at store.canuckduck.ca.",
           "required": false
         }
       ],
@@ -33,16 +33,21 @@
     }
   ],
   "tools": [
-    {"name": "canuckduck_search", "description": "Search 1,328 Canadian policy variables"},
-    {"name": "canuckduck_stats", "description": "Graph summary statistics"},
-    {"name": "canuckduck_forward", "description": "Trace downstream causal effects"},
-    {"name": "canuckduck_backward", "description": "Trace upstream causes"},
-    {"name": "canuckduck_paths", "description": "Find causal paths between variables"},
-    {"name": "canuckduck_impact", "description": "Full impact radius analysis"},
-    {"name": "canuckduck_evidence", "description": "Government source evidence and citations"},
-    {"name": "canuckduck_news", "description": "Canadian policy news articles"},
-    {"name": "canuckduck_constitutional", "description": "Constitutional doctrine exploration"},
-    {"name": "canuckduck_root_trace", "description": "Trace to constitutional roots with CanLII cases"},
-    {"name": "canuckduck_cda_profile", "description": "Constitutional Divergence Analysis"}
+    {"name": "canuckduck_search", "description": "Search 1,334 Canadian policy variables by keyword. Use first to find variable IDs for graph traversal."},
+    {"name": "canuckduck_stats", "description": "Graph summary: variables, edges, organizations, cases, constitutional doctrines."},
+    {"name": "canuckduck_geo_lookup", "description": "Look up any Canadian postal code or FSA. Returns community, city, province, coordinates."},
+    {"name": "canuckduck_geo_stats", "description": "Geographic data coverage: FSA codes, municipalities, ridings, postal codes."},
+    {"name": "canuckduck_forward", "description": "Trace downstream causal effects of a variable. Answers: 'If X changes, what else changes?'"},
+    {"name": "canuckduck_backward", "description": "Trace upstream causes of a variable. Answers: 'Why is X happening?'"},
+    {"name": "canuckduck_paths", "description": "Find all causal paths between two policy variables."},
+    {"name": "canuckduck_impact", "description": "Full causal impact radius — upstream and downstream relationships scored by influence weight."},
+    {"name": "canuckduck_evidence", "description": "Source evidence and CanLII case citations for a causal relationship."},
+    {"name": "canuckduck_news", "description": "Canadian news from government and media RSS feeds, filtered by policy topic."},
+    {"name": "canuckduck_geo_variables", "description": "Find RIPPLE variables scoped to a specific Canadian province."},
+    {"name": "canuckduck_local_impact", "description": "Localize a policy scenario's impacts to a specific Canadian community."},
+    {"name": "canuckduck_constitutional", "description": "Explore 46 constitutional doctrines with connected policy variables."},
+    {"name": "canuckduck_root_trace", "description": "Trace a variable to constitutional roots with CanLII case citations."},
+    {"name": "canuckduck_cda_profile", "description": "Constitutional Divergence Analysis: pressure scores, Charter divergence, legal precedents."},
+    {"name": "canuckduck_simulate", "description": "Multi-variable policy scenario simulation with projected values and constitutional warnings."}
   ]
 }
