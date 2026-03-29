@@ -3,6 +3,7 @@
   "name": "ca.canuckduck/ripple",
   "display_name": "CanuckDUCK RIPPLE",
   "description": "Canadian civic intelligence MCP server. RIPPLE causal policy graph (1,334 variables, 5,130+ causal edges), 46 constitutional doctrines, 165 CanLII landmark cases, 114 federal organizations with TBS budget data, geospatial intelligence (5,161 municipalities, 338 ridings, 29,638 postal codes). Live feeds from Statistics Canada, Bank of Canada, PBO, CIHI, ECCC. Adversarially validated by competing Mistral and Gemini AI models. Built by CanuckDUCK Research Corporation, Calgary AB.",
+  "license": "MIT",
   "repository": {
     "url": "https://github.com/canuckduckdevops/canuckduck-mcp",
     "source": "github"
