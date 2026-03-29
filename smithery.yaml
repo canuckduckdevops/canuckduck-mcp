@@ -1,4 +1,5 @@
 name: canuckduck-ripple
+license: MIT
 description: >
   Canadian civic intelligence MCP server. RIPPLE causal policy graph
   (1,334 variables, 5,130+ causal edges), constitutional doctrine
