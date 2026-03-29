@@ -51,6 +51,7 @@
     {"name": "canuckduck_cda_profile", "description": "Constitutional Divergence Analysis: pressure scores, Charter divergence, legal precedents."},
     {"name": "canuckduck_simulate", "description": "Multi-variable policy scenario simulation with projected values and constitutional warnings."},
     {"name": "canuckduck_propose", "description": "Propose a new variable, causal edge, or evidence to the RIPPLE graph review queue."},
-    {"name": "canuckduck_review_queue", "description": "List, check status, or approve/reject graph proposals."}
+    {"name": "canuckduck_review_queue", "description": "List, check status, or approve/reject graph proposals."},
+    {"name": "canuckduck_gaps", "description": "Observatory gap analysis: health score, search miss clusters, path failures, evidence voids."}
   ]
 }

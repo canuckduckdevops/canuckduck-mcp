@@ -12,6 +12,8 @@ Auth:      X-API-Key header (tiered by key prefix)
 Backend:   api.canuckduck.ca/ripple
 """
 
+import asyncio
+import hashlib
 import json
 import os
 import time
@@ -144,6 +146,104 @@ def _format_response(data: dict, fmt: ResponseFormat) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
+# ── Observatory telemetry ────────────────────────────────────────────────────
+
+_TELEMETRY_SQL = """
+INSERT INTO ripple_mcp_telemetry
+    (request_id, tool_name, api_key_tier, search_query, search_result_count,
+     path_from_var, path_to_var, path_count,
+     simulate_var_count, simulate_affected_count,
+     traverse_variable, traverse_depth_reached, traverse_path_count,
+     result_count, min_confidence, max_confidence, avg_confidence,
+     response_time_ms, error_type, signal_type)
+VALUES
+    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+
+def _emit_telemetry(tool_name: str, **kwargs):
+    """Fire-and-forget telemetry insert. Never raises."""
+    try:
+        row = {
+            "request_id": str(uuid.uuid4()),
+            "tool_name": tool_name,
+            "api_key_tier": "public",
+            "search_query": None,
+            "search_result_count": None,
+            "path_from_var": None,
+            "path_to_var": None,
+            "path_count": None,
+            "simulate_var_count": None,
+            "simulate_affected_count": None,
+            "traverse_variable": None,
+            "traverse_depth_reached": None,
+            "traverse_path_count": None,
+            "result_count": None,
+            "min_confidence": None,
+            "max_confidence": None,
+            "avg_confidence": None,
+            "response_time_ms": None,
+            "error_type": None,
+            "signal_type": None,
+        }
+        row.update(kwargs)
+
+        # Classify signals
+        if row["signal_type"] is None:
+            if tool_name == "canuckduck_search" and row.get("search_result_count") == 0:
+                row["signal_type"] = "search_miss"
+            elif tool_name == "canuckduck_paths" and row.get("path_count") == 0:
+                row["signal_type"] = "path_failure"
+            elif tool_name in ("canuckduck_forward", "canuckduck_backward") and row.get("traverse_path_count") == 0:
+                row["signal_type"] = "dead_end"
+            elif tool_name == "canuckduck_root_trace" and row.get("result_count") == 0:
+                row["signal_type"] = "constitutional_gap"
+            elif tool_name == "canuckduck_evidence" and row.get("result_count") == 0:
+                row["signal_type"] = "evidence_void"
+            elif row.get("avg_confidence") is not None and row["avg_confidence"] < 0.4:
+                row["signal_type"] = "low_confidence"
+
+        conn = _get_proposal_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(_TELEMETRY_SQL, (
+                row["request_id"], row["tool_name"], row["api_key_tier"],
+                row["search_query"], row["search_result_count"],
+                row["path_from_var"], row["path_to_var"], row["path_count"],
+                row["simulate_var_count"], row["simulate_affected_count"],
+                row["traverse_variable"], row["traverse_depth_reached"],
+                row["traverse_path_count"],
+                row["result_count"], row["min_confidence"], row["max_confidence"],
+                row["avg_confidence"], row["response_time_ms"],
+                row["error_type"], row["signal_type"],
+            ))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass  # Telemetry must never break tools
+
+
+def _extract_result_count(result_str: str) -> int:
+    """Extract result count from a JSON response string."""
+    try:
+        data = json.loads(result_str)
+        if isinstance(data, dict):
+            for key in ("results", "paths", "impacts", "articles", "evidence_chains",
+                        "doctrines", "variables", "effects"):
+                if key in data and isinstance(data[key], list):
+                    return len(data[key])
+            if "path_count" in data:
+                return data["path_count"]
+            if "total_paths" in data:
+                return data["total_paths"]
+            if "total_affected" in data:
+                return data["total_affected"]
+        return -1  # unknown
+    except Exception:
+        return -1
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PUBLIC TOOLS (no API key required)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -200,9 +300,18 @@ async def canuckduck_search(params: SearchInput) -> str:
              description, baseline, target, unit, and tier fields.
     """
     try:
+        t0 = time.monotonic()
         data = await _ripple_get("/search", {"q": params.query, "limit": params.limit})
+        result_count = len(data.get("results", []))
+        _emit_telemetry("canuckduck_search",
+                        search_query=params.query[:200],
+                        search_result_count=result_count,
+                        result_count=result_count,
+                        response_time_ms=int((time.monotonic() - t0) * 1000))
         return _format_response(data, params.response_format)
     except Exception as e:
+        _emit_telemetry("canuckduck_search", search_query=params.query[:200],
+                        search_result_count=0, result_count=0, error_type=type(e).__name__)
         return _handle_error(e)
 
 
@@ -322,6 +431,7 @@ async def canuckduck_forward(params: ForwardInput) -> str:
              and summary statistics.
     """
     try:
+        t0 = time.monotonic()
         data = await _ripple_get("/forward", {
             "variable": params.variable,
             "max_depth": params.max_depth,
@@ -329,8 +439,15 @@ async def canuckduck_forward(params: ForwardInput) -> str:
             "min_confidence": params.min_confidence,
             "format": params.response_format.value,
         })
+        pc = len(data.get("paths", data.get("effects", [])))
+        _emit_telemetry("canuckduck_forward",
+                        traverse_variable=params.variable[:100],
+                        traverse_path_count=pc, result_count=pc,
+                        response_time_ms=int((time.monotonic() - t0) * 1000))
         return _format_response(data, params.response_format)
     except Exception as e:
+        _emit_telemetry("canuckduck_forward", traverse_variable=params.variable[:100],
+                        traverse_path_count=0, result_count=0, error_type=type(e).__name__)
         return _handle_error(e)
 
 
@@ -395,14 +512,22 @@ async def canuckduck_backward(params: BackwardInput) -> str:
              frequency map of most common root causes.
     """
     try:
+        t0 = time.monotonic()
         data = await _ripple_get("/backward", {
             "variable": params.variable,
             "max_depth": params.max_depth,
             "min_confidence": params.min_confidence,
             "format": params.response_format.value,
         })
+        pc = len(data.get("paths", data.get("causes", [])))
+        _emit_telemetry("canuckduck_backward",
+                        traverse_variable=params.variable[:100],
+                        traverse_path_count=pc, result_count=pc,
+                        response_time_ms=int((time.monotonic() - t0) * 1000))
         return _format_response(data, params.response_format)
     except Exception as e:
+        _emit_telemetry("canuckduck_backward", traverse_variable=params.variable[:100],
+                        traverse_path_count=0, result_count=0, error_type=type(e).__name__)
         return _handle_error(e)
 
 
@@ -471,14 +596,25 @@ async def canuckduck_paths(params: PathsInput) -> str:
              and intermediates frequency map showing critical nodes.
     """
     try:
+        t0 = time.monotonic()
         data = await _ripple_get("/paths", {
             "from": params.from_variable,
             "to": params.to_variable,
             "max_depth": params.max_depth,
             "format": params.response_format.value,
         })
+        pc = data.get("path_count", data.get("total_paths", len(data.get("paths", []))))
+        _emit_telemetry("canuckduck_paths",
+                        path_from_var=params.from_variable[:100],
+                        path_to_var=params.to_variable[:100],
+                        path_count=pc, result_count=pc,
+                        response_time_ms=int((time.monotonic() - t0) * 1000))
         return _format_response(data, params.response_format)
     except Exception as e:
+        _emit_telemetry("canuckduck_paths",
+                        path_from_var=params.from_variable[:100],
+                        path_to_var=params.to_variable[:100],
+                        path_count=0, result_count=0, error_type=type(e).__name__)
         return _handle_error(e)
 
 
@@ -602,13 +738,19 @@ async def canuckduck_evidence(params: EvidenceInput) -> str:
              confidence, and evidence_type fields.
     """
     try:
+        t0 = time.monotonic()
         data = await _ripple_get("/evidence", {
             "variable": params.variable,
             "limit": params.limit,
             "format": params.response_format.value,
         })
+        ec = len(data.get("evidence_chains", data.get("evidence", [])))
+        _emit_telemetry("canuckduck_evidence", result_count=ec,
+                        traverse_variable=params.variable[:100],
+                        response_time_ms=int((time.monotonic() - t0) * 1000))
         return _format_response(data, params.response_format)
     except Exception as e:
+        _emit_telemetry("canuckduck_evidence", result_count=0, error_type=type(e).__name__)
         return _handle_error(e)
 
 
@@ -802,12 +944,18 @@ async def canuckduck_root_trace(params: RootTraceInput) -> str:
              and overall constitutional_risk_score.
     """
     try:
+        t0 = time.monotonic()
         data = await _ripple_get("/root_trace", {
             "variable": params.variable,
             "format": params.response_format.value,
         })
+        roots = len(data.get("constitutional_roots", []))
+        _emit_telemetry("canuckduck_root_trace", result_count=roots,
+                        traverse_variable=params.variable[:100],
+                        response_time_ms=int((time.monotonic() - t0) * 1000))
         return _format_response(data, params.response_format)
     except Exception as e:
+        _emit_telemetry("canuckduck_root_trace", result_count=0, error_type=type(e).__name__)
         return _handle_error(e)
 
 
@@ -1015,6 +1163,16 @@ async def canuckduck_simulate(params: ScenarioInput) -> str:
         "scenario_inputs": scenario_list,
         "depth": params.depth,
     }
+
+    # Telemetry for simulate
+    max_impact = max((abs(i["estimated_impact_percent"]) for i in result["impacts"]), default=0)
+    _emit_telemetry("canuckduck_simulate",
+                    simulate_var_count=len(scenario_list),
+                    simulate_affected_count=len(all_impacts),
+                    result_count=len(all_impacts),
+                    has_constitutional_warnings=len(warnings) > 0,
+                    signal_type="sim_anomaly" if max_impact > 1000 else None)
+
     return _format_response(result, params.response_format)
 
 
@@ -1730,13 +1888,178 @@ async def canuckduck_review_queue(params: ReviewQueueInput) -> str:
         return _handle_error(e)
 
 
+# ── Observatory gaps tool ────────────────────────────────────────────────────
+
+class GapsInput(BaseModel):
+    """Query the RIPPLE Observatory gap analysis."""
+    model_config = ConfigDict(extra="forbid")
+    report_type: str = Field(
+        default="summary",
+        description="'summary' (overview + top gaps), 'search_misses', 'path_failures', "
+                    "'calibration', 'evidence_voids', 'constitutional', or 'full'",
+        pattern=r"^(summary|search_misses|path_failures|calibration|evidence_voids|constitutional|full)$",
+    )
+    severity_filter: Optional[str] = Field(
+        default=None, description="Filter by severity: 'critical', 'high', 'medium', 'low'",
+        pattern=r"^(critical|high|medium|low)$",
+    )
+    category_filter: Optional[str] = Field(default=None, description="Filter by RIPPLE category")
+    limit: int = Field(default=20, ge=1, le=100, description="Max gaps to return")
+    response_format: ResponseFormat = Field(default=ResponseFormat.JSON, description="'markdown' or 'json'")
+
+
+@mcp.tool(
+    name="canuckduck_gaps",
+    annotations={
+        "title": "Observatory Gap Analysis",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def canuckduck_gaps(params: GapsInput) -> str:
+    """
+    Query the RIPPLE Observatory for detected graph gaps and health metrics.
+
+    The observatory passively monitors all MCP requests to identify where
+    the graph is deficient: search misses, disconnected paths, simulation
+    anomalies, evidence voids, and constitutional gaps.
+
+    Report types:
+    - 'summary': Graph health score + top gaps ranked by priority
+    - 'search_misses': Concepts users search for but the graph lacks
+    - 'path_failures': Variable pairs users expect to be connected but aren't
+    - 'calibration': Simulation outputs that are statistically anomalous
+    - 'evidence_voids': Edges lacking supporting evidence
+    - 'constitutional': Policy variables missing constitutional mapping
+    - 'full': All of the above
+
+    Requires: Professional API key (cduck_p_*).
+    """
+    try:
+        conn = _get_proposal_db()
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Telemetry stats
+            cur.execute("SELECT count(*) AS total FROM ripple_mcp_telemetry")
+            total_requests = cur.fetchone()["total"]
+
+            cur.execute("""
+                SELECT signal_type, count(*) AS cnt
+                FROM ripple_mcp_telemetry
+                WHERE signal_type IS NOT NULL
+                GROUP BY signal_type ORDER BY cnt DESC
+            """)
+            signal_counts = {r["signal_type"]: r["cnt"] for r in cur.fetchall()}
+
+            cur.execute("SELECT count(*) AS cnt FROM ripple_mcp_telemetry WHERE signal_type = 'search_miss'")
+            miss_count = cur.fetchone()["cnt"]
+
+            # Gap analysis stats
+            where_parts, vals = ["status = 'open'"], []
+            if params.severity_filter:
+                where_parts.append("severity = %s")
+                vals.append(params.severity_filter)
+            if params.category_filter:
+                where_parts.append("category = %s")
+                vals.append(params.category_filter)
+            where_sql = " AND ".join(where_parts)
+
+            cur.execute(f"""
+                SELECT * FROM ripple_gap_analysis
+                WHERE {where_sql}
+                ORDER BY priority_score DESC NULLS LAST
+                LIMIT %s
+            """, vals + [params.limit])
+            gaps = [dict(r) for r in cur.fetchall()]
+
+            cur.execute("""
+                SELECT severity, count(*) AS cnt
+                FROM ripple_gap_analysis WHERE status = 'open'
+                GROUP BY severity
+            """)
+            severity_counts = {r["severity"]: r["cnt"] for r in cur.fetchall()}
+
+            cur.execute("""
+                SELECT gap_type, count(*) AS cnt
+                FROM ripple_gap_analysis WHERE status = 'open'
+                GROUP BY gap_type
+            """)
+            type_counts = {r["gap_type"]: r["cnt"] for r in cur.fetchall()}
+
+            # Health score
+            critical = severity_counts.get("critical", 0)
+            high = severity_counts.get("high", 0)
+            medium = severity_counts.get("medium", 0)
+            penalty = min(critical * 5, 25) + min(high * 2, 20) + min(medium * 0.5, 15)
+            miss_rate = (miss_count / max(total_requests, 1)) * 100
+            penalty += min(miss_rate, 15)
+            health_score = max(0, round(100 - penalty))
+
+            # Search miss clusters (for search_misses and full reports)
+            search_clusters = []
+            if params.report_type in ("search_misses", "full", "summary"):
+                cur.execute("""
+                    SELECT search_query, count(*) AS cnt
+                    FROM ripple_mcp_telemetry
+                    WHERE signal_type = 'search_miss' AND search_query IS NOT NULL
+                    GROUP BY search_query
+                    HAVING count(*) >= 2
+                    ORDER BY cnt DESC LIMIT 20
+                """)
+                search_clusters = [dict(r) for r in cur.fetchall()]
+
+            # Path failures
+            path_failures = []
+            if params.report_type in ("path_failures", "full"):
+                cur.execute("""
+                    SELECT path_from_var, path_to_var, count(*) AS cnt
+                    FROM ripple_mcp_telemetry
+                    WHERE signal_type = 'path_failure'
+                    GROUP BY path_from_var, path_to_var
+                    HAVING count(*) >= 2
+                    ORDER BY cnt DESC LIMIT 20
+                """)
+                path_failures = [dict(r) for r in cur.fetchall()]
+
+            result = {
+                "graph_health_score": health_score,
+                "total_open_gaps": sum(severity_counts.values()),
+                "gaps_by_severity": severity_counts,
+                "gaps_by_type": type_counts,
+                "telemetry_summary": {
+                    "total_requests": total_requests,
+                    "signal_counts": signal_counts,
+                    "miss_rate_percent": round(miss_rate, 1),
+                },
+            }
+
+            if params.report_type in ("summary", "full"):
+                result["top_gaps"] = gaps[:10]
+            if params.report_type in ("search_misses", "full"):
+                result["search_miss_clusters"] = search_clusters
+            if params.report_type in ("path_failures", "full"):
+                result["path_failure_clusters"] = path_failures
+            if params.report_type not in ("summary",):
+                result["gaps"] = gaps
+
+            return json.dumps(result, indent=2, ensure_ascii=False, default=str)
+        finally:
+            conn.close()
+
+    except Exception as e:
+        return _handle_error(e)
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
     print(f"CanuckDUCK MCP Server starting on port {MCP_PORT}...")
     print(f"RIPPLE API backend: {RIPPLE_API_BASE}")
-    print(f"Tools registered: 18 (4 public, 10 registered, 4 professional)")
+    print(f"Tools registered: 19 (4 public, 10 registered, 5 professional)")
     mcp.settings.port = MCP_PORT
     mcp.settings.json_response = True
     mcp.settings.stateless_http = True

@@ -38,7 +38,7 @@ Settings → Integrations → Add MCP Server
 3. Your key is auto-provisioned on checkout
 4. View your key at [nest.canuckduck.ca/nest/api-keys](https://nest.canuckduck.ca/nest/api-keys)
 
-## Available Tools (18)
+## Available Tools (19)
 
 ### Public (no key required)
 | Tool | Description |
@@ -69,6 +69,7 @@ Settings → Integrations → Add MCP Server
 | `canuckduck_root_trace` | Trace a variable to constitutional roots with CanLII case citations and legal precedents. |
 | `canuckduck_cda_profile` | Constitutional Divergence Analysis profile: pressure scores, Charter divergence, linked legal precedents. |
 | `canuckduck_simulate` | Multi-variable policy scenario simulation with projected values, constitutional warnings, and geographic context. |
+| `canuckduck_gaps` | Observatory gap analysis: graph health score, search miss clusters, path failures, simulation anomalies, evidence voids. |
 
 ## Data Sources
 
